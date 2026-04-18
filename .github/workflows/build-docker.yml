@@ -28,7 +28,7 @@ jobs:
     secrets: inherit
     with:
       components: '["web"]'
-      docker_target_prefix: "wp"
+      docker_target_prefix: "wp-"
 
   # lint:
   #   needs: build
