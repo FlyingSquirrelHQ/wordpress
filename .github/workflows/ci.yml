@@ -33,7 +33,6 @@ jobs:
   phpunit:
     name: PHPUnit
     runs-on: ubuntu-latest
-    if: hashFiles('phpunit.xml.dist') != '' || hashFiles('phpunit.xml') != ''
     services:
       mysql:
         image: mariadb:11.8
