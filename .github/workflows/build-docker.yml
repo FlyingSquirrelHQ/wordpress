@@ -27,7 +27,8 @@ jobs:
     uses: notch8/actions/.github/workflows/build.yaml@v1.0.9
     secrets: inherit
     with:
-      components: '["wp-web"]'
+      components: '["web"]'
+      docker_target_prefix: "wp"
 
   # lint:
   #   needs: build
