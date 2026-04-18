@@ -37,8 +37,8 @@ services:
       context: .
       dockerfile: Dockerfile
       target: wp-web
-    image: flyingsquirrelhq/wordpress:local
-    pull_policy: build
+    # Local default: build :local. CI pulls GHCR (set WORDPRESS_IMAGE + WORDPRESS_PULL_POLICY=always); see .env comments.
+    image: ${WORDPRESS_IMAGE:-flyingsquirrelhq/wordpress:latest}
     restart: unless-stopped
     depends_on:
       db:
@@ -94,6 +94,25 @@ services:
     volumes:
       # Mount full wp-content for local development (overrides image-baked empty dirs).
       - ./wp-content:/var/www/html/wp-content
+
+  # PHPUnit + WordPress test library against service `db` (no host MySQL). Usage:
+  #   docker compose --profile tests run --rm phpunit
+  #   docker compose --profile tests run --rm phpunit -- --filter SomeTest
+  phpunit:
+    profiles: ["tests"]
+    build:
+      context: .
+      dockerfile: docker/phpunit/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      WP_PHPUNIT_VERSION: ${WP_PHPUNIT_VERSION:-6.9.4}
+    volumes:
+      - .:/var/www/html
+    entrypoint: ["bash", "/var/www/html/docker/phpunit/run.sh"]
 
   # Local Traefik when stack_car / sc proxy is not running. Do not use together with
   # another Traefik on the same host ports (pick one).

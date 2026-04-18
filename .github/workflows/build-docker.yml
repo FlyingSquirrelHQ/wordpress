@@ -30,6 +30,85 @@ jobs:
       components: '["web"]'
       docker_target_prefix: "wp-"
 
+  # Smoke runs after GHCR push completes (same workflow) so `docker compose pull` is reliable.
+  # Image tag matches notch8 setup-env: first 8 chars of PR head SHA on pull_request, else github.sha.
+  # Default-branch builds also publish :latest; this job pins to the commit tag for consistency on PRs.
+  smoke:
+    name: Smoke (Docker + WordPress)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      WP_MULTISITE_MODE: off
+      WP_SITE_URL: http://127.0.0.1:8080
+      WP_DOMAIN_CURRENT_SITE: 127.0.0.1
+      WP_CLI_URL: http://127.0.0.1:8080
+      WP_BEHIND_REVERSE_PROXY: "false"
+      WORDPRESS_PULL_POLICY: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve WORDPRESS_IMAGE (match notch8 setup-env tag)
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            SHA="${{ github.sha }}"
+          fi
+          TAG8="${SHA:0:8}"
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${REPO_LOWER}/web:${TAG8}"
+          if [[ -z "${TAG8}" || -z "${REPO_LOWER}" ]]; then
+            echo "Could not resolve image tag."
+            exit 1
+          fi
+          echo "TAG8=${TAG8}" >> "${GITHUB_ENV}"
+          echo "WORDPRESS_IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+          echo "WORDPRESS_IMAGE=${IMAGE}"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create external Compose network
+        run: docker network create stackcar
+
+      - name: Pull pre-built image and start stack
+        run: |
+          set -euo pipefail
+          if [[ -z "${WORDPRESS_IMAGE:-}" ]]; then
+            echo "WORDPRESS_IMAGE is unset; refusing to fall back to local build."
+            exit 1
+          fi
+          docker compose pull wordpress
+          docker compose up -d
+
+      - name: Wait for WordPress
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 40); do
+            if docker compose exec -T wordpress wp --allow-root core is-installed 2>/dev/null; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "WordPress did not become installed in time."
+          docker compose logs --no-color wordpress
+          exit 1
+
+      - name: Verify HTTP and WP-CLI
+        run: |
+          set -euo pipefail
+          docker compose exec -T wordpress wp --allow-root core is-installed
+          code="$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)"
+          test "$code" = 200
+
   # lint:
   #   needs: build
   #   uses: notch8/actions/.github/workflows/lint.yaml@v1.0.9

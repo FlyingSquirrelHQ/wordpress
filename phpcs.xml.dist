@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<ruleset name="FlyingSquirrel WordPress">
+	<description>WordPress Coding Standards for project-owned PHP only.</description>
+
+	<rule ref="WordPress"/>
+
+	<file>wp-content/mu-plugins</file>
+
+	<arg value="ps"/>
+	<arg name="colors"/>
+	<arg name="extensions" value="php"/>
+
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+</ruleset>
