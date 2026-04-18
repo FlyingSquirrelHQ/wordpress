@@ -11,26 +11,44 @@
 
 set -Eeuo pipefail
 
+finish_start() {
+	if [[ -f /var/www/html/wp-config.php ]]; then
+		ms_mode="$(printf '%s' "${WP_MULTISITE_MODE:-off}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+		# Always run when present: script no-ops unless wp_site/wp_blogs exist. Do not gate on
+		# WP_MULTISITE_MODE — Compose can default that to "off" if .env was not interpolated.
+		if [[ -f /usr/local/share/wordpress/wp-ms-align-network.sh ]]; then
+			/usr/local/share/wordpress/wp-ms-align-network.sh || echo >&2 "wp-ms-align-network: failed (non-fatal)."
+		fi
+		if [[ -f /usr/local/share/wordpress/wp-url-sync-https.sh ]]; then
+			/usr/local/share/wordpress/wp-url-sync-https.sh || echo >&2 "wp-url-sync-https: failed (non-fatal)."
+		fi
+		if [[ "${ms_mode}" == "network" ]] && [[ -f /usr/local/share/wordpress/ensure-multisite-htaccess.sh ]]; then
+			/usr/local/share/wordpress/ensure-multisite-htaccess.sh || echo >&2 "ensure-multisite-htaccess: failed (non-fatal); fix .htaccess manually if permalinks break."
+		fi
+	fi
+	exec apache2-foreground "$@"
+}
+
 # Support legacy WORDPRESS_* names from older .env files.
 auto="${WP_AUTO_INSTALL:-${WORDPRESS_AUTO_INSTALL:-}}"
 case "${auto}" in
 	1 | true | TRUE | yes | on) ;;
 	*)
 		echo >&2 "wp-auto-install: WP_AUTO_INSTALL is unset/disabled (effective: '${auto:-empty}'); starting Apache without WP-CLI install. Set WP_AUTO_INSTALL=on in .env to skip the web wizard."
-		exec apache2-foreground "$@"
+		finish_start "$@"
 		;;
 esac
 
 if [ ! -f /var/www/html/wp-config.php ]; then
 	echo >&2 "WP_AUTO_INSTALL is set but wp-config.php is missing; starting Apache without install."
-	exec apache2-foreground "$@"
+	finish_start "$@"
 fi
 
 admin_pass="${WP_ADMIN_PASSWORD:-${WORDPRESS_ADMIN_PASSWORD:-}}"
 admin_email="${WP_ADMIN_EMAIL:-${WORDPRESS_ADMIN_EMAIL:-}}"
 if [ -z "${admin_pass}" ] || [ -z "${admin_email}" ]; then
 	echo >&2 "WP_AUTO_INSTALL is set but WP_ADMIN_PASSWORD or WP_ADMIN_EMAIL is missing; skipping WP-CLI install. Starting Apache — use the web installer or fix .env and recreate the container."
-	exec apache2-foreground "$@"
+	finish_start "$@"
 fi
 
 export APP_NAME="${APP_NAME:-wordpress}"
@@ -50,9 +68,4 @@ if ! /usr/local/share/wordpress/wp-auto-install-www.sh; then
 	echo >&2 "Automated WordPress install failed (see messages above). Starting Apache — use the web installer or fix DB credentials / WP_SITE_URL and recreate the container."
 fi
 
-ms_mode="$(printf '%s' "${WP_MULTISITE_MODE:-off}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-if [[ "${ms_mode}" == "network" ]] && [[ -f /usr/local/share/wordpress/ensure-multisite-htaccess.sh ]]; then
-	/usr/local/share/wordpress/ensure-multisite-htaccess.sh || echo >&2 "ensure-multisite-htaccess: failed (non-fatal); fix .htaccess manually if permalinks break."
-fi
-
-exec apache2-foreground "$@"
+finish_start "$@"

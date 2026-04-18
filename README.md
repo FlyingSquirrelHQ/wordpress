@@ -12,8 +12,7 @@ PHP 8.3, Apache, MariaDB, optional WP-CLI auto-install, and [Hyku](https://githu
 Ensure the **`stackcar`** network exists (stack_car `sc proxy` creates it, or run `docker network create stackcar` once). From the repo root:
 
 ```bash
-cp .env.example .env
-# Edit .env: set strong DB passwords and any optional vars.
+# Edit `.env` if needed (defaults target local dev; set strong DB passwords when sharing).
 
 docker compose up -d
 ```
@@ -38,7 +37,7 @@ If you **cannot** use Traefik (ports blocked, no proxy), use the direct mapping 
 
 Set **`WP_SITE_URL`** and **`WP_DOMAIN_CURRENT_SITE`** in `.env` to match how you actually open the site (**https://…** behind Traefik, **http://localhost:…** for direct port).
 
-- Database and `wp-config.php` are driven by **`WORDPRESS_*`** vars that the official image reads (see `.env.example`).
+- Database and `wp-config.php` are driven by **`WORDPRESS_*`** vars that the official image reads (see `.env`).
 - Bootstrap / WP-CLI install uses **`WP_*`** (e.g. `WP_AUTO_INSTALL`, `WP_ADMIN_*`, `WP_SITE_URL`) so startup logs for `wp-config.php` stay limited to real config keys.
 - To skip the five-minute web installer, set `WP_AUTO_INSTALL=1` (or `on`) plus `WP_ADMIN_PASSWORD` and `WP_ADMIN_EMAIL`; ensure `WP_SITE_URL` matches the URL you use in the browser. WP-CLI install runs only when the database does not already contain a site (if you used the browser installer once, reset the DB volume or run `docker compose down -v` before expecting automation again).
 
@@ -120,6 +119,8 @@ Two routers (apex `Host(...)` + subdomain `HostRegexp`) point at the same WordPr
 3. **Lock in constants:** Set `WP_MULTISITE_MODE=network`, `WP_SUBDOMAIN_INSTALL=true`, `WP_DOMAIN_CURRENT_SITE` = apex only (e.g. `wordpress.localhost.direct`, no `https://`), `WP_PATH_CURRENT_SITE=/`. Match **Network Admin → Settings** if WordPress suggested different IDs. Recreate the container. **`.htaccess`:** with `WP_MULTISITE_MODE=network`, the image writes multisite rewrite rules to `/var/www/html/.htaccess` on start (bind-mounted `wp-content` only—no need to edit the file by hand for a root install at `/`).
 4. **Add sites:** **Network Admin → Sites → Add New**; new blogs load at `https://<slug>.${APP_NAME}.localhost.direct` (same pattern as Hyku tenant hosts).
 
+**Redirect loops (`ERR_TOO_MANY_REDIRECTS` on `wp-login.php`, `wp-signup.php`, etc.):** WordPress must see HTTPS (`is_ssl()`). The stack uses Apache **`SetEnvIf X-Forwarded-Proto`**, wp-config proxy fixes, **`docker-compose` Traefik labels** (`headers.sslProxyHeaders` on the **websecure** routers), **`WP_SYNC_HTTPS_SITEURL`**, and (optional) **`WP_DISABLE_REDIRECT_CANONICAL`** via **`wp-content/mu-plugins/flyingsquirrel-proxy.php`**. Recreate **`wordpress`** after label changes, restart/reload Traefik so it picks up new middleware, and clear cookies. In **`WP_MULTISITE_MODE=network`**, **`WP_HOME`** / **`WP_SITEURL`** are not injected in wp-config.
+
 If you already installed under an old hostname (e.g. `wp-wordpress.localhost.direct`), either **search-replace URLs in the DB** or **`docker compose down -v`** and reinstall with the new `WP_SITE_URL`.
 
 ## Project layout
@@ -135,7 +136,7 @@ If you already installed under an old hostname (e.g. `wp-wordpress.localhost.dir
 
 ## Environment reference
 
-See **`.env.example`** for database credentials, auto-install, multisite, and Traefik-related URLs. Bump pinned image versions in the `Dockerfile` and `docker-compose.yml` when you intentionally upgrade WordPress, PHP, MariaDB, or WP-CLI.
+See **`.env`** for database credentials, auto-install, multisite, and Traefik-related URLs. Bump pinned image versions in the `Dockerfile` and `docker-compose.yml` when you intentionally upgrade WordPress, PHP, MariaDB, or WP-CLI.
 
 ### WP-CLI and `WORDPRESS_CONFIG_EXTRA_FILE`
 

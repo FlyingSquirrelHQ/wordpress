@@ -11,6 +11,9 @@ WP_PHAR=/usr/local/lib/wp-cli/wp-cli.phar
 if [[ -r /proc/1/environ ]]; then
 	while IFS= read -r -d '' _line; do
 		case "${_line}" in
+			WP_CLI_URL=*)
+				export WP_CLI_URL="${_line#WP_CLI_URL=}"
+				;;
 			WORDPRESS_CONFIG_EXTRA_FILE=*)
 				export WORDPRESS_CONFIG_EXTRA_FILE="${_line#WORDPRESS_CONFIG_EXTRA_FILE=}"
 				;;

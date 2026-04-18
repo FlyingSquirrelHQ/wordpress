@@ -36,6 +36,8 @@ RUN set -eux; \
 	rm -rf /var/lib/apt/lists/*
 
 COPY docker/php/conf.d/zz-custom.ini /usr/local/etc/php/conf.d/zz-custom.ini
+COPY docker/apache/zz-reverse-proxy.conf /etc/apache2/conf-available/zz-reverse-proxy.conf
+RUN a2enconf zz-reverse-proxy
 
 # Baked plugins/themes ship in /usr/src/wordpress so the upstream entrypoint's tar copy
 # merges them into /var/www/html/wp-content on first run (and upgrades respect existing dirs).
@@ -51,11 +53,15 @@ COPY docker/apache2-auto-install /usr/local/bin/apache2-auto-install
 COPY docker/wp.sh /usr/local/bin/wp
 COPY docker/wp-auto-install-www.sh /usr/local/share/wordpress/wp-auto-install-www.sh
 COPY docker/ensure-multisite-htaccess.sh /usr/local/share/wordpress/ensure-multisite-htaccess.sh
+COPY docker/wp-url-sync-https.sh /usr/local/share/wordpress/wp-url-sync-https.sh
+COPY docker/wp-ms-align-network.sh /usr/local/share/wordpress/wp-ms-align-network.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint-multitenant.sh \
 	/usr/local/bin/apache2-auto-install \
 	/usr/local/bin/wp \
 	/usr/local/share/wordpress/wp-auto-install-www.sh \
-	/usr/local/share/wordpress/ensure-multisite-htaccess.sh
+	/usr/local/share/wordpress/ensure-multisite-htaccess.sh \
+	/usr/local/share/wordpress/wp-url-sync-https.sh \
+	/usr/local/share/wordpress/wp-ms-align-network.sh
 
 # Baked default: run `wp core install` on first start when the DB is empty (see
 # apache2-auto-install). Override at runtime with `-e WP_AUTO_INSTALL=off` or Compose.

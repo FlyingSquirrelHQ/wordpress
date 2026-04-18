@@ -2,7 +2,7 @@
 # external `stackcar` network (stack_car `sc proxy`). Create the network first if needed:
 #   docker network create stackcar
 #
-# Configuration lives in `.env` (copy from `.env.example`). Compose interpolates ${VAR} from
+# Configuration lives in `.env`. Compose interpolates ${VAR} from
 # `.env` for ports, labels, and MariaDB bootstrap mapping; services load the same file via
 # `env_file`.
 
@@ -51,6 +51,11 @@ services:
       WP_AUTO_INSTALL: ${WP_AUTO_INSTALL:-on}
       # Must be passed here (not only env_file) so Compose always injects the value you set in `.env`.
       WP_MULTISITE_MODE: ${WP_MULTISITE_MODE:-off}
+      # Same: mysql align + wp-config must see the same host/path the browser uses.
+      WP_DOMAIN_CURRENT_SITE: ${WP_DOMAIN_CURRENT_SITE:-${APP_NAME:-wordpress}.localhost.direct}
+      WP_PATH_CURRENT_SITE: ${WP_PATH_CURRENT_SITE:-/}
+      # Default URL for WP-CLI on multisite (`wp option …` without `--url`).
+      WP_CLI_URL: ${WP_SITE_URL:-https://${APP_NAME:-wordpress}.localhost.direct}
     networks:
       - default
       - stackcar
@@ -60,15 +65,20 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=stackcar"
       - "traefik.http.services.wp-${APP_NAME:-wordpress}.loadbalancer.server.port=80"
+      # Force forwarded TLS hints to Apache (sslProxyHeaders is a map in Traefik v3, not a bool).
+      - "traefik.http.middlewares.wp-${APP_NAME:-wordpress}-ssl.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.wp-${APP_NAME:-wordpress}-ssl.headers.customrequestheaders.X-Forwarded-Ssl=on"
       # HTTPS (entrypoint websecure — requires a Traefik on stackcar listening on :443)
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}.tls=true"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}.entrypoints=websecure"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}.priority=20"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}.rule=Host(`${APP_NAME:-wordpress}.localhost.direct`)"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}.middlewares=wp-${APP_NAME:-wordpress}-ssl@docker"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.tls=true"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.entrypoints=websecure"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.priority=10"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.rule=HostRegexp(`^[a-z0-9-]+\\.${APP_NAME:-wordpress}\\.localhost\\.direct$`)"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.middlewares=wp-${APP_NAME:-wordpress}-ssl@docker"
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.service=wp-${APP_NAME:-wordpress}"
       # HTTP (entrypoint web — same hosts on :80; set WP_SITE_URL to http:// when using this only)
       - "traefik.http.routers.wp-${APP_NAME:-wordpress}-http.entrypoints=web"

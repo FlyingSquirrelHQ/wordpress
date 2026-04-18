@@ -17,27 +17,52 @@ append_config_extra() {
 	export WORDPRESS_CONFIG_EXTRA
 }
 
-# --- Multisite (multitenant) modes -------------------------------------------
-# WP_MULTISITE_MODE=off          default, no multisite defines
-# WP_MULTISITE_MODE=prepare     define('WP_ALLOW_MULTISITE', true) for Tools → Network Setup
-# WP_MULTISITE_MODE=network     full network block (use after network is configured / restored)
-#
-# When WP_MULTISITE_MODE=network, set at least:
-#   WP_DOMAIN_CURRENT_SITE, WP_PATH_CURRENT_SITE (default /)
-# Optional: WP_SUBDOMAIN_INSTALL (true|false), WP_SITE_ID_CURRENT_SITE, WP_BLOG_ID_CURRENT_SITE
-#
-# Aliases for "prepare": on, true, yes, 1 (common mistake vs WP_AUTO_INSTALL=on)
-
 mode_raw="${WP_MULTISITE_MODE:-off}"
 mode="$(printf '%s' "${mode_raw}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+# Proxy fixes first so MULTISITE bootstrap never sees the wrong scheme/host.
+if [ "${WP_BEHIND_REVERSE_PROXY:-true}" = "true" ] || [ "${WP_BEHIND_REVERSE_PROXY:-true}" = "1" ]; then
+	append_config_extra "$(cat <<'PHP'
+// WordPress is_ssl() ignores X-Forwarded-*; align with TLS termination (Traefik, etc.).
+$__fs_https = false;
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && stripos((string) $_SERVER['HTTP_X_FORWARDED_PROTO'], 'https') !== false) {
+	$__fs_https = true;
+} elseif (!empty($_SERVER['HTTP_X_FORWARDED_SSL']) && strtolower((string) $_SERVER['HTTP_X_FORWARDED_SSL']) === 'on') {
+	$__fs_https = true;
+} elseif (!empty($_SERVER['HTTP_FRONT_END_HTTPS']) && strtolower((string) $_SERVER['HTTP_FRONT_END_HTTPS']) === 'on') {
+	$__fs_https = true;
+}
+if ($__fs_https) {
+	$_SERVER['HTTPS'] = 'on';
+	$_SERVER['REQUEST_SCHEME'] = 'https';
+	$_SERVER['SERVER_PORT'] = '443';
+}
+unset($__fs_https);
+if (!empty($_SERVER['HTTP_X_FORWARDED_HOST'])) {
+	$forwarded = trim((string) $_SERVER['HTTP_X_FORWARDED_HOST']);
+	$forwarded = trim(explode(',', $forwarded, 2)[0]);
+	$forwarded = preg_replace('/:\d+$/', '', $forwarded);
+	if ($forwarded !== '') {
+		$_SERVER['HTTP_HOST'] = strtolower($forwarded);
+	}
+} elseif (!empty($_SERVER['HTTP_HOST'])) {
+	$_SERVER['HTTP_HOST'] = strtolower((string) $_SERVER['HTTP_HOST']);
+	$_SERVER['HTTP_HOST'] = preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST']);
+}
+PHP
+)"
+fi
+
+# --- Multisite (multitenant) modes -------------------------------------------
 case "${mode}" in
 	prepare | on | true | yes | 1)
 		echo >&2 "docker-entrypoint-multitenant: WP_MULTISITE_MODE='${mode_raw}' → WP_ALLOW_MULTISITE (use Tools → Network Setup in wp-admin)."
 		append_config_extra "define('WP_ALLOW_MULTISITE', true);"
 		;;
 	network)
-		echo >&2 "docker-entrypoint-multitenant: WP_MULTISITE_MODE=network → MULTISITE constants for ${WP_DOMAIN_CURRENT_SITE:-${APP_NAME:-wordpress}.localhost.direct}"
 		domain="${WP_DOMAIN_CURRENT_SITE:-${APP_NAME:-wordpress}.localhost.direct}"
+		domain="$(printf '%s' "${domain}" | tr '[:upper:]' '[:lower:]')"
+		echo >&2 "docker-entrypoint-multitenant: WP_MULTISITE_MODE=network → MULTISITE constants for ${domain}"
 		path="${WP_PATH_CURRENT_SITE:-/}"
 		subdomain="${WP_SUBDOMAIN_INSTALL:-false}"
 		site_id="${WP_SITE_ID_CURRENT_SITE:-1}"
@@ -59,22 +84,12 @@ PHP
 		;;
 esac
 
-# Optional hardening / proxy hints (safe defaults for many compose setups)
-if [ "${WP_BEHIND_REVERSE_PROXY:-true}" = "true" ] || [ "${WP_BEHIND_REVERSE_PROXY:-true}" = "1" ]; then
-	append_config_extra "$(cat <<'PHP'
-if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strpos($_SERVER['HTTP_X_FORWARDED_PROTO'], 'https') !== false) {
-	$_SERVER['HTTPS'] = 'on';
-}
-if (!empty($_SERVER['HTTP_X_FORWARDED_HOST'])) {
-	$forwarded = trim((string) $_SERVER['HTTP_X_FORWARDED_HOST']);
-	$forwarded = trim(explode(',', $forwarded, 2)[0]);
-	$forwarded = preg_replace('/:\d+$/', '', $forwarded);
-	if ($forwarded !== '') {
-		$_SERVER['HTTP_HOST'] = $forwarded;
-	}
-}
-PHP
-)"
+# Pin home/siteurl for single-site (and prepare) only — see README / .env (multisite breaks).
+site_url="${WP_SITE_URL:-${WORDPRESS_SITE_URL:-}}"
+if [ -n "${site_url}" ] && [ "${mode}" != "network" ]; then
+	safe_url="${site_url//\'/\\\'}"
+	append_config_extra "$(printf '%s\n' "define( 'WP_HOME', '${safe_url}' );
+define( 'WP_SITEURL', '${safe_url}' );")"
 fi
 
 # Long / multiline values often fail getenv() under Apache. The official image supports
