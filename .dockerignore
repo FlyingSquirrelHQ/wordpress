@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.md
+docker-compose*.yml
+
+# Local dev wp-content can be huge; image bakes from ./baked/wp-content only.
+wp-content/

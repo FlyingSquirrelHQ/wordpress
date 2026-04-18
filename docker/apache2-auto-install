@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Command name must start with "apache2" so the official WordPress docker-entrypoint
+# extracts core and generates wp-config.php before this script runs.
+# Then we optionally run WP-CLI to complete the five-minute install from env vars.
+#
+# Installer settings use WP_* (not WORDPRESS_*) so the stock entrypoint’s wp-config
+# log line only lists real wp-config variables (WORDPRESS_DB_*, TABLE_PREFIX, DEBUG, …).
+#
+# WP-CLI runs before Apache starts so HTTP requests cannot open the web installer in
+# parallel (that race left the DB half-initialized and the language screen kept appearing).
+
+set -Eeuo pipefail
+
+# Support legacy WORDPRESS_* names from older .env files.
+auto="${WP_AUTO_INSTALL:-${WORDPRESS_AUTO_INSTALL:-}}"
+case "${auto}" in
+	1 | true | TRUE | yes | on) ;;
+	*)
+		echo >&2 "wp-auto-install: WP_AUTO_INSTALL is unset/disabled (effective: '${auto:-empty}'); starting Apache without WP-CLI install. Set WP_AUTO_INSTALL=on in .env to skip the web wizard."
+		exec apache2-foreground "$@"
+		;;
+esac
+
+if [ ! -f /var/www/html/wp-config.php ]; then
+	echo >&2 "WP_AUTO_INSTALL is set but wp-config.php is missing; starting Apache without install."
+	exec apache2-foreground "$@"
+fi
+
+admin_pass="${WP_ADMIN_PASSWORD:-${WORDPRESS_ADMIN_PASSWORD:-}}"
+admin_email="${WP_ADMIN_EMAIL:-${WORDPRESS_ADMIN_EMAIL:-}}"
+if [ -z "${admin_pass}" ] || [ -z "${admin_email}" ]; then
+	echo >&2 "WP_AUTO_INSTALL is set but WP_ADMIN_PASSWORD or WP_ADMIN_EMAIL is missing; skipping WP-CLI install. Starting Apache — use the web installer or fix .env and recreate the container."
+	exec apache2-foreground "$@"
+fi
+
+export APP_NAME="${APP_NAME:-wordpress}"
+export \
+	WP_SITE_URL="${WP_SITE_URL:-${WORDPRESS_SITE_URL:-https://${APP_NAME:-wordpress}.localhost.direct}}" \
+	WP_SITE_TITLE="${WP_SITE_TITLE:-${WORDPRESS_SITE_TITLE:-WordPress}}" \
+	WP_ADMIN_USER="${WP_ADMIN_USER:-${WORDPRESS_ADMIN_USER:-admin}}" \
+	WP_ADMIN_PASSWORD="${admin_pass}" \
+	WP_ADMIN_EMAIL="${admin_email}" \
+	WP_INSTALL_LOCALE="${WP_INSTALL_LOCALE:-${WORDPRESS_LOCALE:-}}" \
+	WP_BLOG_PUBLIC="${WP_BLOG_PUBLIC:-${WORDPRESS_BLOG_PUBLIC:-1}}"
+
+echo >&2 "wp-auto-install: WP-CLI bootstrap enabled; site URL will be '${WP_SITE_URL}'; admin user '${WP_ADMIN_USER}'; admin email set (${#admin_email} chars); password set (${#admin_pass} chars)."
+echo >&2 "wp-auto-install: completing install before Apache binds :80 (Traefik may 502 for up to ~60s while waiting for the database)."
+
+if ! /usr/local/share/wordpress/wp-auto-install-www.sh; then
+	echo >&2 "Automated WordPress install failed (see messages above). Starting Apache — use the web installer or fix DB credentials / WP_SITE_URL and recreate the container."
+fi
+
+ms_mode="$(printf '%s' "${WP_MULTISITE_MODE:-off}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+if [[ "${ms_mode}" == "network" ]] && [[ -f /usr/local/share/wordpress/ensure-multisite-htaccess.sh ]]; then
+	/usr/local/share/wordpress/ensure-multisite-htaccess.sh || echo >&2 "ensure-multisite-htaccess: failed (non-fatal); fix .htaccess manually if permalinks break."
+fi
+
+exec apache2-foreground "$@"

@@ -1,0 +1,110 @@
+# WordPress + MariaDB on the default Compose network, plus Hyku-style Traefik labels on the
+# external `stackcar` network (stack_car `sc proxy`). Create the network first if needed:
+#   docker network create stackcar
+#
+# Configuration lives in `.env` (copy from `.env.example`). Compose interpolates ${VAR} from
+# `.env` for ports, labels, and MariaDB bootstrap mapping; services load the same file via
+# `env_file`.
+
+networks:
+  stackcar:
+    external: true
+
+services:
+  db:
+    # Pinned stable release (bump with care; export DB before major upgrades).
+    image: mariadb:11.8.6
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    restart: unless-stopped
+    env_file:
+      - .env
+    # MariaDB expects MARIADB_*; map from WORDPRESS_DB_* so one set of DB vars in `.env`.
+    environment:
+      MARIADB_DATABASE: ${WORDPRESS_DB_NAME:-wordpress}
+      MARIADB_USER: ${WORDPRESS_DB_USER:-wordpress}
+      MARIADB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-wordpress}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  wordpress:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flyingsquirrelhq/wordpress:local
+    pull_policy: build
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    # Defaults + explicit passthrough so bootstrap vars are always set for the container
+    # process (matches `docker compose` interpolation from the project `.env` file).
+    environment:
+      APP_NAME: ${APP_NAME:-wordpress}
+      WP_AUTO_INSTALL: ${WP_AUTO_INSTALL:-on}
+      # Must be passed here (not only env_file) so Compose always injects the value you set in `.env`.
+      WP_MULTISITE_MODE: ${WP_MULTISITE_MODE:-off}
+    networks:
+      - default
+      - stackcar
+    ports:
+      - "${WP_PORT:-8080}:80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=stackcar"
+      - "traefik.http.services.wp-${APP_NAME:-wordpress}.loadbalancer.server.port=80"
+      # HTTPS (entrypoint websecure — requires a Traefik on stackcar listening on :443)
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}.tls=true"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}.entrypoints=websecure"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}.priority=20"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}.rule=Host(`${APP_NAME:-wordpress}.localhost.direct`)"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.tls=true"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.entrypoints=websecure"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.priority=10"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.rule=HostRegexp(`^[a-z0-9-]+\\.${APP_NAME:-wordpress}\\.localhost\\.direct$`)"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub.service=wp-${APP_NAME:-wordpress}"
+      # HTTP (entrypoint web — same hosts on :80; set WP_SITE_URL to http:// when using this only)
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-http.entrypoints=web"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-http.priority=20"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-http.rule=Host(`${APP_NAME:-wordpress}.localhost.direct`)"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-http.service=wp-${APP_NAME:-wordpress}"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub-http.entrypoints=web"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub-http.priority=10"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub-http.rule=HostRegexp(`^[a-z0-9-]+\\.${APP_NAME:-wordpress}\\.localhost\\.direct$`)"
+      - "traefik.http.routers.wp-${APP_NAME:-wordpress}-sub-http.service=wp-${APP_NAME:-wordpress}"
+
+    volumes:
+      # Mount full wp-content for local development (overrides image-baked empty dirs).
+      - ./wp-content:/var/www/html/wp-content
+
+  # Local Traefik when stack_car / sc proxy is not running. Do not use together with
+  # another Traefik on the same host ports (pick one).
+  traefik:
+    profiles: ["traefik"]
+    image: traefik:v3.3
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=stackcar"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http.tls=true"
+      - "--log.level=INFO"
+    ports:
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - stackcar
+
+volumes:
+  db_data:
