@@ -141,3 +141,24 @@ See **`.env`** for database credentials, auto-install, multisite, and Traefik-re
 ### WP-CLI and `WORDPRESS_CONFIG_EXTRA_FILE`
 
 `docker compose exec` does not inherit the **runtime** env of Apache (PID 1). The **`/usr/local/bin/wp`** wrapper copies `WORDPRESS_CONFIG_EXTRA_FILE` and `WORDPRESS_CONFIG_EXTRA` from `/proc/1/environ` before running the phar so WP-CLI matches the web app.
+
+## CI: PHP tests and coverage
+
+GitHub Actions (`.github/workflows/ci.yml`) runs **PHPCS**, **PHPUnit** against the WordPress test library, collects **Clover** + HTML coverage for `wp-content/mu-plugins` (PCOV in CI), enforces a floor with `rregeer/phpunit-coverage-check`, and uploads **`clover.xml`** to **Codecov** (see `codecov.yml`).
+
+**Repository setup**
+
+- Install the [Codecov GitHub app](https://github.com/apps/codecov) on this repository (or organization) and add a **`CODECOV_TOKEN`** secret if Codecov asks for one (common for private repositories).
+- Optional: set a repository variable **`PHP_COVERAGE_MIN`** (integer percent). If unset, CI defaults to **55** so the first merge does not fight an arbitrary ceiling; raise it over time after you confirm the real metric (see below).
+- To block merges on green CI, use branch protection on `main` and require the **PHPUnit** workflow job (and the Codecov check if you want its status merge-blocking in addition to the local `coverage-check` step).
+
+**Local coverage** (needs PCOV or Xdebug, plus MySQL for `bin/install-wp-tests.sh`):
+
+```bash
+composer install
+bash bin/install-wp-tests.sh wordpress_test root root 127.0.0.1:3306 6.9.4
+composer run test:coverage
+./vendor/bin/coverage-check clover.xml 55   # use the same number as PHP_COVERAGE_MIN / composer.json "coverage:check"
+```
+
+After `composer run test:coverage`, inspect **`build/coverage-html/`** (when generated) or the CI artifact **php-coverage**. Ratchet **`PHP_COVERAGE_MIN`** and the `coverage:check` script in `composer.json` upward as coverage improves so they stay aligned with Codecov’s project/patch targets in `codecov.yml`.

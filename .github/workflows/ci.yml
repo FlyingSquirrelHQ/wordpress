@@ -32,6 +32,8 @@ jobs:
   phpunit:
     name: PHPUnit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     services:
       mysql:
         image: mariadb:11.8
@@ -52,6 +54,7 @@ jobs:
         with:
           php-version: "8.3"
           extensions: mysqli
+          coverage: pcov
           tools: composer:v2
 
       - name: Install Composer dependencies
@@ -63,5 +66,28 @@ jobs:
       - name: Install WordPress test library
         run: bash bin/install-wp-tests.sh wordpress_test root root 127.0.0.1:3306 6.9.4
 
-      - name: Run PHPUnit
-        run: ./vendor/bin/phpunit
+      - name: Run PHPUnit with coverage
+        run: |
+          ./vendor/bin/phpunit \
+            --coverage-clover=clover.xml \
+            --coverage-html=build/coverage-html
+
+      - name: Enforce minimum coverage
+        env:
+          MIN: ${{ vars.PHP_COVERAGE_MIN }}
+        run: ./vendor/bin/coverage-check clover.xml "${MIN:-55}"
+
+      - name: Upload Clover to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: clover.xml
+          fail_ci_if_error: false
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-coverage
+          path: |
+            clover.xml
+            build/coverage-html
