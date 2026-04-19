@@ -11,7 +11,7 @@
 			<directory suffix="Test.php">tests</directory>
 		</testsuite>
 	</testsuites>
-	<coverage processUncoveredFiles="true">
+	<coverage processUncoveredFiles="false">
 		<include>
 			<directory suffix=".php">wp-content/mu-plugins</directory>
 		</include>

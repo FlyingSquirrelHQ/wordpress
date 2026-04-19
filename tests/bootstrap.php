@@ -1,6 +1,10 @@
 <?php
 /**
- * PHPUnit bootstrap: WordPress test library + mu-plugin copied into test core.
+ * PHPUnit bootstrap: WordPress test library + mu-plugin linked into test core.
+ *
+ * Uses a symlink (when supported) so the plugin is the same path PHPUnit coverage
+ * whitelists; a plain copy under /tmp would load twice and redeclare functions
+ * when the Clover report is generated.
  *
  * @package Flyingsquirrel
  */
@@ -30,10 +34,22 @@ if ( ! is_dir( $mu_dir ) && ! mkdir( $mu_dir, 0777, true ) && ! is_dir( $mu_dir 
 	exit( 1 );
 }
 
-$src = dirname( __DIR__ ) . '/wp-content/mu-plugins/flyingsquirrel-proxy.php';
-$dst = $mu_dir . '/flyingsquirrel-proxy.php';
-if ( ! is_readable( $src ) || ! copy( $src, $dst ) ) {
-	echo 'Could not copy mu-plugin into test WordPress: ' . $src, PHP_EOL;
+$src      = dirname( __DIR__ ) . '/wp-content/mu-plugins/flyingsquirrel-proxy.php';
+$src_real = realpath( $src );
+$dst      = $mu_dir . '/flyingsquirrel-proxy.php';
+if ( false === $src_real || ! is_readable( $src_real ) ) {
+	echo 'Could not resolve mu-plugin source: ' . $src, PHP_EOL;
+	exit( 1 );
+}
+if ( file_exists( $dst ) || is_link( $dst ) ) {
+	if ( ! unlink( $dst ) ) {
+		echo 'Could not remove existing mu-plugin path: ' . $dst, PHP_EOL;
+		exit( 1 );
+	}
+}
+$linked = function_exists( 'symlink' ) && symlink( $src_real, $dst );
+if ( ! $linked && ! copy( $src_real, $dst ) ) {
+	echo 'Could not link or copy mu-plugin into test WordPress: ' . $src_real, PHP_EOL;
 	exit( 1 );
 }
 
