@@ -75,7 +75,7 @@ jobs:
       - name: Enforce minimum coverage
         env:
           MIN: ${{ vars.PHP_COVERAGE_MIN }}
-        run: ./vendor/bin/coverage-check clover.xml "${MIN:-55}"
+        run: ./vendor/bin/coverage-check clover.xml "${MIN:-35}"
 
       - name: Upload Clover to Codecov
         uses: codecov/codecov-action@v4

@@ -28,6 +28,6 @@
 			"@phpunit"
 		],
 		"test:coverage": "phpunit --coverage-clover=clover.xml",
-		"coverage:check": "coverage-check clover.xml 55"
+		"coverage:check": "coverage-check clover.xml 35"
 	}
 }

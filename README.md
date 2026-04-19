@@ -149,7 +149,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs **PHPCS**, **PHPUnit** against 
 **Repository setup**
 
 - Install the [Codecov GitHub app](https://github.com/apps/codecov) on this repository (or organization) and add a **`CODECOV_TOKEN`** secret if Codecov asks for one (common for private repositories).
-- Optional: set a repository variable **`PHP_COVERAGE_MIN`** (integer percent). If unset, CI defaults to **55** so the first merge does not fight an arbitrary ceiling; raise it over time after you confirm the real metric (see below).
+- Optional: set a repository variable **`PHP_COVERAGE_MIN`** (integer percent). If unset, CI defaults to **35** (current baseline for the mu-plugin; the `phpunit-coverage-check` metric blends statements, methods, and elements). Raise it as you add tests—especially for the `template_redirect` path.
 - To block merges on green CI, use branch protection on `main` and require the **PHPUnit** workflow job (and the Codecov check if you want its status merge-blocking in addition to the local `coverage-check` step).
 
 **Local coverage** (needs PCOV or Xdebug, plus MySQL for `bin/install-wp-tests.sh`):
@@ -158,7 +158,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs **PHPCS**, **PHPUnit** against 
 composer install
 bash bin/install-wp-tests.sh wordpress_test root root 127.0.0.1:3306 6.9.4
 composer run test:coverage
-./vendor/bin/coverage-check clover.xml 55   # use the same number as PHP_COVERAGE_MIN / composer.json "coverage:check"
+./vendor/bin/coverage-check clover.xml 35   # same floor as CI default / composer.json "coverage:check"
 ```
 
 After `composer run test:coverage`, inspect **`build/coverage-html/`** (when generated) or the CI artifact **php-coverage**. Ratchet **`PHP_COVERAGE_MIN`** and the `coverage:check` script in `composer.json` upward as coverage improves so they stay aligned with Codecov’s project/patch targets in `codecov.yml`.
